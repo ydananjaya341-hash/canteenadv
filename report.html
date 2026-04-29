@@ -64,14 +64,14 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, onSnapshot, doc, getDoc, getDocs, query, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, onSnapshot, doc, getDocs, query, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // Firebase Config
         let firebaseConfig = {};
         try { firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {}; } catch(e) {}
         
         if (!firebaseConfig.apiKey) {
-            // Hardcoded configuration for GitHub Pages deployment
+            // Hardcoded configuration for standard deployment
             firebaseConfig = {
                 apiKey: "AIzaSyAfKp8gWavPxo5EZafetpeADh7eeRHQQx0",
                 authDomain: "canteen-2d80d.firebaseapp.com",
@@ -95,7 +95,6 @@
         };
         
         const SYS_SESSION_KEY = `ent_sys_session_${appId}`;
-        const STATS_CACHE_KEY = `ent_report_stats_${appId}`;
         let loggedInSysUser = null;
 
         // Boot Synchronization States
@@ -159,7 +158,8 @@
                         loader.classList.add('opacity-0');
                         setTimeout(() => {
                             loader.classList.add('hidden');
-                            document.getElementById('view-report').classList.remove('hidden');
+                            const rptView = document.getElementById('view-report');
+                            if (rptView) rptView.classList.remove('hidden');
                             initialRenderDone = true;
                         }, 500);
                     }
@@ -222,46 +222,11 @@
             window.location.href = 'index.html';
         };
 
-        // ============================================================
-        // 0-SECOND INSTANT BOOT CACHE ENGINE (Persistent Login Fix)
-        // ============================================================
-        const checkInstantBoot = () => {
-            const sessionStr = localStorage.getItem(SYS_SESSION_KEY);
-            if (sessionStr) {
-                try {
-                    const session = JSON.parse(sessionStr);
-                    if (session.username && session.role) {
-                        loggedInSysUser = session;
-                        
-                        const cachedStatsStr = localStorage.getItem(STATS_CACHE_KEY);
-                        if (cachedStatsStr) {
-                            try {
-                                const s = JSON.parse(cachedStatsStr);
-                                document.getElementById('rpt-total-spend').textContent = formatCurrency(s.tValue || 0);
-                                document.getElementById('rpt-tokens-issued-today').textContent = s.tIssued || 0;
-                                document.getElementById('rpt-tokens-consumed-today').textContent = s.tRedeemed || 0;
-                                document.getElementById('rpt-month-spend').textContent = formatCurrency(s.mValue || 0);
-                                document.getElementById('rpt-month-issued').textContent = s.mIssued || 0;
-                                document.getElementById('rpt-month-consumed').textContent = s.mRedeemed || 0;
-                            } catch(e) {}
-                        }
-                        
-                        document.getElementById('view-loading').classList.add('hidden');
-                        document.getElementById('view-unauthorized').classList.add('hidden');
-                        document.getElementById('view-report').classList.remove('hidden');
-                        
-                        document.getElementById('rpt-start').value = getTodayStr();
-                        document.getElementById('rpt-end').value = getTodayStr();
-                        
-                        initialRenderDone = true;
-                        return true;
-                    }
-                } catch(e) {}
-            }
-            return false;
+        window.appLogout = () => {
+            localStorage.removeItem(SYS_SESSION_KEY);
+            sessionStorage.removeItem('ent_report_tokens');
+            window.location.href = 'index.html';
         };
-
-        const didInstantBoot = checkInstantBoot();
 
         // ============================================================
         // 5-SECOND MANDATORY LOAD & WAIT ALGORITHM
@@ -271,20 +236,25 @@
             isDataReady = false;
             isTimeReady = false;
             
-            document.getElementById('view-unauthorized').classList.add('hidden');
-            document.getElementById('view-report').classList.add('hidden');
-            
+            const unauth = document.getElementById('view-unauthorized');
+            const report = document.getElementById('view-report');
             const loader = document.getElementById('view-loading');
-            loader.classList.remove('hidden');
-            loader.classList.remove('opacity-0');
             
-            // Mandatory 5 Second Delay
+            if (unauth) unauth.classList.add('hidden');
+            if (report) report.classList.add('hidden');
+            
+            if (loader) {
+                loader.classList.remove('hidden');
+                loader.classList.remove('opacity-0');
+            }
+            
+            // Wait 3.5 Seconds to show beautiful loading sequence
             setTimeout(() => {
                 isTimeReady = true;
                 attemptReveal();
-            }, 5000);
+            }, 3500);
             
-            loadData();
+            loadData(false);
         }
 
         function attemptReveal() {
@@ -294,43 +264,69 @@
         }
 
         function showUnauthorized() {
-            document.getElementById('view-loading').classList.add('hidden');
-            document.getElementById('view-report').classList.add('hidden');
-            document.getElementById('view-unauthorized').classList.remove('hidden');
-            document.getElementById('view-unauthorized').classList.add('flex');
+            const loading = document.getElementById('view-loading');
+            const report = document.getElementById('view-report');
+            const unauth = document.getElementById('view-unauthorized');
+            
+            if (loading) loading.classList.add('hidden');
+            if (report) report.classList.add('hidden');
+            if (unauth) {
+                unauth.classList.remove('hidden');
+                unauth.classList.add('flex');
+            }
         }
 
         onAuthStateChanged(auth, (user) => {
             if (user) {
-                if (!didInstantBoot) {
-                    window.setRealLoadingProgress(30, 'Verifying Credentials');
-                    const sessionStr = localStorage.getItem(SYS_SESSION_KEY);
-                    if (sessionStr) {
-                        try {
-                            const session = JSON.parse(sessionStr);
-                            if(session.username && session.role) {
-                                loggedInSysUser = session;
-                                document.getElementById('rpt-start').value = getTodayStr();
-                                document.getElementById('rpt-end').value = getTodayStr();
-                                startBootSequence();
+                const sessionStr = localStorage.getItem(SYS_SESSION_KEY);
+                if (sessionStr) {
+                    try {
+                        const session = JSON.parse(sessionStr);
+                        if(session.username && session.role) {
+                            loggedInSysUser = session;
+                            document.getElementById('rpt-start').value = getTodayStr();
+                            document.getElementById('rpt-end').value = getTodayStr();
+                            
+                            // Check if this is a simple page refresh (F5) or a fresh entry from dashboard
+                            const navType = performance.getEntriesByType("navigation")[0]?.type;
+                            const isReload = navType === "reload";
+                            
+                            if (isReload && sessionStorage.getItem('ent_report_tokens')) {
+                                // 0-SECOND REFRESH CACHE
+                                try {
+                                    loadedTokens = JSON.parse(sessionStorage.getItem('ent_report_tokens'));
+                                    isTimeReady = true;
+                                    isDataReady = true;
+                                    initialRenderDone = true;
+                                    document.getElementById('view-loading').classList.add('hidden');
+                                    document.getElementById('view-report').classList.remove('hidden');
+                                    renderReportDashboard();
+                                    
+                                    // Start silent background sync
+                                    loadData(true);
+                                } catch(e) {
+                                    startBootSequence();
+                                }
                             } else {
-                                showUnauthorized();
+                                // FRESH ENTRY (from dashboard) -> Clear cache and show loading animation
+                                sessionStorage.removeItem('ent_report_tokens');
+                                startBootSequence();
                             }
-                        } catch (e) { showUnauthorized(); }
-                    } else {
-                        showUnauthorized();
-                    }
+                        } else {
+                            showUnauthorized();
+                        }
+                    } catch (e) { showUnauthorized(); }
                 } else {
-                    loadData();
+                    showUnauthorized();
                 }
             } else {
-                if (!didInstantBoot) showUnauthorized();
+                showUnauthorized();
             }
         });
 
         initAuth();
 
-        const loadData = () => {
+        const loadData = (isSilent = false) => {
             if (!auth.currentUser) return;
             
             let pricesLoaded = false;
@@ -340,7 +336,7 @@
                 if (pricesLoaded && tokensLoaded) {
                     renderReportDashboard(); 
                     isDataReady = true;      
-                    if (!initialRenderDone) attemptReveal(); 
+                    if (!initialRenderDone && !isSilent) attemptReveal(); 
                 }
             };
 
@@ -352,13 +348,12 @@
                         loggedInSysUser.role = docSnap.data().role;
                         localStorage.setItem(SYS_SESSION_KEY, JSON.stringify(loggedInSysUser));
                     }
-                    if (!initialRenderDone) window.setRealLoadingProgress(45, 'Establishing Link');
+                    if (!initialRenderDone && !isSilent) window.setRealLoadingProgress(45, 'Establishing Link');
                 }, (err) => {
-                    console.warn("User fetch warning:", err);
-                    if (!initialRenderDone) window.setRealLoadingProgress(45, 'Establishing Link');
+                    if (!initialRenderDone && !isSilent) window.setRealLoadingProgress(45, 'Establishing Link');
                 });
             } else {
-                if (!initialRenderDone) window.setRealLoadingProgress(45, 'Establishing Link');
+                if (!initialRenderDone && !isSilent) window.setRealLoadingProgress(45, 'Establishing Link');
             }
 
             // 2. Fetch Meal Prices
@@ -370,10 +365,9 @@
                     else if (data.dailyRates) dailyRates = data.dailyRates;
                 }
                 pricesLoaded = true;
-                if (!initialRenderDone) window.setRealLoadingProgress(60, 'Loading Financials');
+                if (!initialRenderDone && !isSilent) window.setRealLoadingProgress(60, 'Loading Financials');
                 checkData();
             }, (err) => {
-                console.error("Prices fetch error:", err);
                 pricesLoaded = true; checkData(); 
             });
 
@@ -385,17 +379,21 @@
                 loadedTokens = [];
                 snap.forEach(doc => { loadedTokens.push({ id: doc.id, ...doc.data() }); });
                 
-                if (!isDataReady && !initialRenderDone) {
+                // Cache to Session Storage so a simple refresh is instantaneous
+                try {
+                    sessionStorage.setItem('ent_report_tokens', JSON.stringify(loadedTokens));
+                } catch(e) {}
+                
+                if (!isDataReady && !initialRenderDone && !isSilent) {
                     tokensLoaded = true;
                     window.setRealLoadingProgress(80, 'Processing Ledger');
                     checkData();
                 } else {
                     renderReportDashboard();
-                    triggerSyncAnimation();
+                    if (isSilent || initialRenderDone) triggerSyncAnimation();
                 }
             }, (err) => {
-                console.error("Tokens fetch error:", err);
-                if (!isDataReady && !initialRenderDone) {
+                if (!isDataReady && !initialRenderDone && !isSilent) {
                     tokensLoaded = true; checkData();
                 }
             });
@@ -433,8 +431,8 @@
             let tableCount = 0;
             
             const sortedTokens = [...loadedTokens].sort((a,b) => {
-                const timeA = a.issuedAt?.seconds || 0;
-                const timeB = b.issuedAt?.seconds || 0;
+                const timeA = a.issuedAt?.seconds || a.issuedAt || 0;
+                const timeB = b.issuedAt?.seconds || b.issuedAt || 0;
                 return timeB - timeA;
             });
 
@@ -519,10 +517,6 @@
                     console.warn("Skipped malformed data record", err);
                 }
             });
-
-            // Cache Commit
-            const statsObj = { tIssued, tRedeemed, tValue, mIssued, mRedeemed, mValue };
-            localStorage.setItem(STATS_CACHE_KEY, JSON.stringify(statsObj));
 
             document.getElementById('rpt-total-spend').textContent = formatCurrency(tValue);
             document.getElementById('rpt-tokens-issued-today').textContent = tIssued;
@@ -658,8 +652,8 @@
                 let totalCost = 0;
 
                 targetTokens.sort((a, b) => {
-                    const tA = a.issuedAt?.seconds || 0;
-                    const tB = b.issuedAt?.seconds || 0;
+                    const tA = a.issuedAt?.seconds || a.issuedAt || 0;
+                    const tB = b.issuedAt?.seconds || b.issuedAt || 0;
                     return tA - tB; 
                 });
 
