@@ -71,7 +71,7 @@
         try { firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {}; } catch(e) {}
         
         if (!firebaseConfig.apiKey) {
-            // Hardcoded configuration for standard deployment
+            // Hardcoded configuration for GitHub Pages deployment
             firebaseConfig = {
                 apiKey: "AIzaSyAfKp8gWavPxo5EZafetpeADh7eeRHQQx0",
                 authDomain: "canteen-2d80d.firebaseapp.com",
@@ -229,12 +229,22 @@
         };
 
         // ============================================================
-        // 5-SECOND MANDATORY LOAD & WAIT ALGORITHM
+        // FULL SYNC LOAD & WAIT ALGORITHM
         // ============================================================
         
         function startBootSequence() {
             isDataReady = false;
             isTimeReady = false;
+            currentLoadPercent = 0;
+            initialRenderDone = false;
+            
+            // Reset Progress Visuals
+            const bar = document.getElementById('main-loading-bar');
+            const pct = document.getElementById('main-loading-percent');
+            const txt = document.getElementById('main-loading-text');
+            if(bar) bar.style.width = '0%';
+            if(pct) pct.textContent = '0';
+            if(txt) txt.textContent = 'Initializing Request';
             
             const unauth = document.getElementById('view-unauthorized');
             const report = document.getElementById('view-report');
@@ -287,12 +297,12 @@
                             document.getElementById('rpt-start').value = getTodayStr();
                             document.getElementById('rpt-end').value = getTodayStr();
                             
-                            // Check if this is a simple page refresh (F5) or a fresh entry from dashboard
-                            const navType = performance.getEntriesByType("navigation")[0]?.type;
-                            const isReload = navType === "reload";
+                            // Detect if this is a simple page refresh (F5) or a fresh entry from dashboard
+                            const navEntries = performance.getEntriesByType("navigation");
+                            const isReload = navEntries.length > 0 && navEntries[0].type === "reload";
                             
                             if (isReload && sessionStorage.getItem('ent_report_tokens')) {
-                                // 0-SECOND REFRESH CACHE
+                                // 0-SECOND REFRESH CACHE (Instantly bypasses the loading screen)
                                 try {
                                     loadedTokens = JSON.parse(sessionStorage.getItem('ent_report_tokens'));
                                     isTimeReady = true;
@@ -308,7 +318,7 @@
                                     startBootSequence();
                                 }
                             } else {
-                                // FRESH ENTRY (from dashboard) -> Clear cache and show loading animation
+                                // FRESH ENTRY (from dashboard) -> Clear cache and show full loading animation
                                 sessionStorage.removeItem('ent_report_tokens');
                                 startBootSequence();
                             }
@@ -382,7 +392,9 @@
                 // Cache to Session Storage so a simple refresh is instantaneous
                 try {
                     sessionStorage.setItem('ent_report_tokens', JSON.stringify(loadedTokens));
-                } catch(e) {}
+                } catch(e) {
+                    console.warn("Session cache full.");
+                }
                 
                 if (!isDataReady && !initialRenderDone && !isSilent) {
                     tokensLoaded = true;
