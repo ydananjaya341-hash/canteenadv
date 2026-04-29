@@ -247,7 +247,7 @@
                         }
                         
                         document.getElementById('view-loading').classList.add('hidden');
-                        document.getElementById('view-login').classList.add('hidden');
+                        document.getElementById('view-unauthorized').classList.add('hidden');
                         document.getElementById('view-report').classList.remove('hidden');
                         
                         document.getElementById('rpt-start').value = getTodayStr();
@@ -271,9 +271,7 @@
             isDataReady = false;
             isTimeReady = false;
             
-            // Lock User into Loading Screen
-            document.getElementById('view-login').classList.add('hidden');
-            document.getElementById('view-login').classList.remove('flex');
+            document.getElementById('view-unauthorized').classList.add('hidden');
             document.getElementById('view-report').classList.add('hidden');
             
             const loader = document.getElementById('view-loading');
@@ -295,6 +293,13 @@
             }
         }
 
+        function showUnauthorized() {
+            document.getElementById('view-loading').classList.add('hidden');
+            document.getElementById('view-report').classList.add('hidden');
+            document.getElementById('view-unauthorized').classList.remove('hidden');
+            document.getElementById('view-unauthorized').classList.add('flex');
+        }
+
         onAuthStateChanged(auth, (user) => {
             if (user) {
                 if (!didInstantBoot) {
@@ -309,26 +314,19 @@
                                 document.getElementById('rpt-end').value = getTodayStr();
                                 startBootSequence();
                             } else {
-                                forceShowLogin();
+                                showUnauthorized();
                             }
-                        } catch (e) { forceShowLogin(); }
+                        } catch (e) { showUnauthorized(); }
                     } else {
-                        forceShowLogin();
+                        showUnauthorized();
                     }
                 } else {
                     loadData();
                 }
             } else {
-                if (!didInstantBoot) forceShowLogin();
+                if (!didInstantBoot) showUnauthorized();
             }
         });
-
-        function forceShowLogin() {
-            document.getElementById('view-loading').classList.add('hidden');
-            document.getElementById('view-report').classList.add('hidden');
-            document.getElementById('view-login').classList.remove('hidden');
-            document.getElementById('view-login').classList.add('flex');
-        }
 
         initAuth();
 
@@ -405,57 +403,12 @@
 
         function formatCurrency(amount) { return formatter.format(amount || 0); }
 
-        window.appLogin = async (e) => {
-            e.preventDefault();
-            const u = document.getElementById('login-username').value.trim().toUpperCase();
-            const p = document.getElementById('login-pin').value.trim();
-            
-            const btn = document.getElementById('login-btn');
-            const originalText = btn.innerHTML;
-            btn.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-2"></i> Authenticating...';
-            btn.disabled = true;
-
-            if (u === 'ADMIN' && p === 'ADMIN123') {
-                loggedInSysUser = { username: 'ADMIN', name: 'System Admin', role: 'ADMIN', status: 'ACTIVE' };
-                localStorage.setItem(SYS_SESSION_KEY, JSON.stringify({ username: 'ADMIN', name: 'System Admin', role: 'ADMIN', date: getTodayStr() }));
-                document.getElementById('login-error').classList.add('hidden');
-                btn.innerHTML = originalText; btn.disabled = false;
-                startBootSequence(); 
-                return;
-            }
-
-            try {
-                const docSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'system_users', u));
-                if (docSnap.exists()) {
-                    const user = docSnap.data();
-                    if (user.pin === p && user.status === 'ACTIVE') {
-                        loggedInSysUser = user;
-                        localStorage.setItem(SYS_SESSION_KEY, JSON.stringify({ 
-                            username: u, name: user.name, role: user.role, date: getTodayStr() 
-                        }));
-                        document.getElementById('login-error').classList.add('hidden');
-                        btn.innerHTML = originalText; btn.disabled = false;
-                        startBootSequence(); 
-                    } else {
-                        document.getElementById('login-error').classList.remove('hidden');
-                        btn.innerHTML = originalText; btn.disabled = false;
-                    }
-                } else {
-                    document.getElementById('login-error').classList.remove('hidden');
-                    btn.innerHTML = originalText; btn.disabled = false;
-                }
-            } catch (err) {
-                showToast("Network Error: Could not verify user.", "error");
-                btn.innerHTML = originalText; btn.disabled = false;
-            }
-        };
-
         // ============================================================
         //  ANALYTICS ENGINE (Live UI Render) - Fully Bulletproofed
         // ============================================================
         function renderReportDashboard() {
             const todayStr = getTodayStr();
-            const currentMonthStart = getCurrentMonthStartStr(); 
+            const currentMonthStr = todayStr.substring(0, 7); 
 
             let tIssued = 0, tRedeemed = 0, tValue = 0;
             let mIssued = 0, mRedeemed = 0, mValue = 0;
@@ -491,7 +444,7 @@
                     const dateStr = data.issuedDate || data.date;
                     
                     // CRITICAL SPEED FIX: Ensure only current month data is processed in the UI charts
-                    if (!dateStr || dateStr < currentMonthStart) return;
+                    if (!dateStr || dateStr < currentMonthStr) return;
 
                     // Safe Cost Calculation
                     let cost = 0;
