@@ -100,11 +100,23 @@
         // Boot Synchronization States
         let isDataReady = false;
         let initialRenderDone = false;
+        let bootInterval = null;
+        let currentVisualPercent = 0;
+        let targetPercent = 0;
 
         document.documentElement.classList.add('dark');
 
         const formatter = new Intl.NumberFormat('en-LK', { style: 'currency', currency: 'LKR' });
         
+        // Ultra-safe timestamp sorting helper
+        const getTimestamp = (val) => {
+            if (!val) return 0;
+            if (val.seconds) return val.seconds;
+            if (typeof val.toDate === 'function') return val.toDate().getTime() / 1000;
+            if (typeof val === 'string' || typeof val === 'number') return new Date(val).getTime() / 1000;
+            return 0;
+        };
+
         function getTodayStr() { 
             const d = new Date();
             const offsetDate = new Date(d.getTime() - (d.getTimezoneOffset() * 60000));
@@ -134,36 +146,6 @@
                 toast.style.opacity = '0'; toast.style.transform = 'translateY(10px)'; toast.style.transition = 'all 0.3s ease';
                 setTimeout(() => toast.remove(), 300);
             }, 3000);
-        };
-
-        // --- True Loading Percentage System ---
-        let currentLoadPercent = 0;
-        window.setRealLoadingProgress = (percent, textStatus) => {
-            if (currentLoadPercent >= 100 || initialRenderDone) return; 
-            currentLoadPercent = percent;
-            
-            const bar = document.getElementById('main-loading-bar');
-            const pct = document.getElementById('main-loading-percent');
-            const txt = document.getElementById('main-loading-text');
-            
-            if (bar) bar.style.width = percent + '%';
-            if (pct) pct.textContent = percent;
-            if (txt && textStatus) txt.textContent = textStatus;
-            
-            if (percent >= 100) {
-                setTimeout(() => {
-                    const loader = document.getElementById('view-loading');
-                    if (loader) {
-                        loader.classList.add('opacity-0');
-                        setTimeout(() => {
-                            loader.classList.add('hidden');
-                            const rptView = document.getElementById('view-report');
-                            if (rptView) rptView.classList.remove('hidden');
-                            initialRenderDone = true;
-                        }, 250); // Faster UI reveal
-                    }
-                }, 200); 
-            }
         };
 
         // --- Live Sync Background Animation ---
@@ -207,7 +189,6 @@
         }
 
         const initAuth = async () => {
-            if (!initialRenderDone) window.setRealLoadingProgress(10, 'Initializing Security Node');
             try {
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                     await signInWithCustomToken(auth, __initial_auth_token);
@@ -221,47 +202,77 @@
             window.location.href = 'index.html';
         };
 
-        window.appLogout = () => {
-            localStorage.removeItem(SYS_SESSION_KEY);
-            sessionStorage.removeItem('ent_report_tokens');
-            window.location.href = 'index.html';
-        };
-
         // ============================================================
-        // LIGHTNING FAST BOOT SEQUENCE (No artificial timers)
+        // SMART PROGRESSIVE LOADING ALGORITHM
         // ============================================================
         
         function startBootSequence() {
             isDataReady = false;
-            currentLoadPercent = 0;
             initialRenderDone = false;
-            
+            currentVisualPercent = 0;
+            targetPercent = 85; // Animates up to 85% until database is fully ready
+
             const bar = document.getElementById('main-loading-bar');
             const pct = document.getElementById('main-loading-percent');
             const txt = document.getElementById('main-loading-text');
+
             if(bar) bar.style.width = '0%';
             if(pct) pct.textContent = '0';
-            if(txt) txt.textContent = 'Initializing Request';
+            if(txt) txt.textContent = 'Connecting to Firebase Node';
 
             const unauth = document.getElementById('view-unauthorized');
             const report = document.getElementById('view-report');
             const loader = document.getElementById('view-loading');
-            
+
             if (unauth) unauth.classList.add('hidden');
             if (report) report.classList.add('hidden');
-            
             if (loader) {
                 loader.classList.remove('hidden');
                 loader.classList.remove('opacity-0');
             }
-            
+
+            // Central Engine: Smoothly animates the UI while data loads in the background
+            clearInterval(bootInterval);
+            bootInterval = setInterval(() => {
+                if (isDataReady) {
+                    targetPercent = 100; // Database confirmed ready, rush to 100%
+                }
+
+                if (currentVisualPercent < targetPercent) {
+                    let step = Math.ceil((targetPercent - currentVisualPercent) / 8);
+                    currentVisualPercent += step;
+                }
+
+                if (txt) {
+                    if (currentVisualPercent < 30) txt.textContent = 'Verifying Security Node...';
+                    else if (currentVisualPercent < 60) txt.textContent = 'Establishing Link...';
+                    else if (currentVisualPercent < 90) txt.textContent = 'Synchronizing Ledger...';
+                    else txt.textContent = 'Intelligence Loaded';
+                }
+
+                if (bar) bar.style.width = currentVisualPercent + '%';
+                if (pct) pct.textContent = currentVisualPercent;
+
+                if (currentVisualPercent >= 100) {
+                    currentVisualPercent = 100;
+                    clearInterval(bootInterval);
+                    setTimeout(() => attemptReveal(), 250);
+                }
+            }, 50);
+
             loadData(false);
         }
 
         function attemptReveal() {
-            // Unlocks INSTANTLY when Data is fully processed (No fake waiting)
-            if (isDataReady && !initialRenderDone) {
-                window.setRealLoadingProgress(100, 'Intelligence Loaded');
+            const loader = document.getElementById('view-loading');
+            if (loader) {
+                loader.classList.add('opacity-0');
+                setTimeout(() => {
+                    loader.classList.add('hidden');
+                    const rptView = document.getElementById('view-report');
+                    if (rptView) rptView.classList.remove('hidden');
+                    initialRenderDone = true;
+                }, 500);
             }
         }
 
@@ -290,8 +301,10 @@
                             document.getElementById('rpt-end').value = getTodayStr();
                             
                             // Detect if this is a simple page refresh (F5) or a fresh entry from dashboard
-                            const navEntries = performance.getEntriesByType("navigation");
-                            const isReload = navEntries.length > 0 && navEntries[0].type === "reload";
+                            const isReload = window.performance && 
+                                             performance.getEntriesByType && 
+                                             performance.getEntriesByType("navigation").length > 0 && 
+                                             performance.getEntriesByType("navigation")[0].type === "reload";
                             
                             if (isReload && sessionStorage.getItem('ent_report_tokens')) {
                                 // 0-SECOND REFRESH CACHE
@@ -309,7 +322,7 @@
                                     startBootSequence();
                                 }
                             } else {
-                                // FRESH ENTRY -> Fetch Monthly data from Firebase without fake timers
+                                // FRESH ENTRY (from dashboard) -> Clear cache and show full loading animation
                                 sessionStorage.removeItem('ent_report_tokens');
                                 startBootSequence();
                             }
@@ -336,12 +349,22 @@
             const checkData = () => {
                 if (pricesLoaded && tokensLoaded) {
                     renderReportDashboard(); 
-                    isDataReady = true;      
-                    if (!initialRenderDone && !isSilent) attemptReveal(); 
+                    isDataReady = true;      // Signals the visual loader to rush to 100%
                 }
             };
 
-            // 1. Fetch Meal Prices
+            // 1. Single Point User Check
+            if (loggedInSysUser && loggedInSysUser.username !== 'ADMIN') {
+                const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'system_users', loggedInSysUser.username);
+                onSnapshot(userRef, (docSnap) => {
+                    if (docSnap.exists() && docSnap.data().role) {
+                        loggedInSysUser.role = docSnap.data().role;
+                        localStorage.setItem(SYS_SESSION_KEY, JSON.stringify(loggedInSysUser));
+                    }
+                }, (err) => { console.warn("User fetch warning:", err); });
+            }
+
+            // 2. Fetch Meal Prices
             const settingsRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'meal_prices');
             onSnapshot(settingsRef, (docSnap) => {
                 if (docSnap.exists()) {
@@ -350,13 +373,12 @@
                     else if (data.dailyRates) dailyRates = data.dailyRates;
                 }
                 pricesLoaded = true;
-                if (!initialRenderDone && !isSilent) window.setRealLoadingProgress(50, 'Loading Financials');
                 checkData();
             }, (err) => {
                 pricesLoaded = true; checkData(); 
             });
 
-            // 2. SECURE FIRESTORE QUERY: Fetch ONLY current month's tokens
+            // 3. SECURE FIRESTORE QUERY: Fetch ONLY current month's tokens to ensure absolute speed
             const currentMonthStart = getCurrentMonthStartStr();
             const qTokens = query(collection(db, 'artifacts', appId, 'public', 'data', 'tokens'), where('issuedDate', '>=', currentMonthStart));
             
@@ -369,7 +391,6 @@
                 
                 if (!isDataReady && !initialRenderDone && !isSilent) {
                     tokensLoaded = true;
-                    window.setRealLoadingProgress(90, 'Processing Ledger');
                     checkData();
                 } else {
                     renderReportDashboard();
@@ -414,15 +435,13 @@
             let tableCount = 0;
             
             const sortedTokens = [...loadedTokens].sort((a,b) => {
-                const timeA = a.issuedAt?.seconds || a.issuedAt || 0;
-                const timeB = b.issuedAt?.seconds || b.issuedAt || 0;
-                return timeB - timeA;
+                return getTimestamp(b.issuedAt) - getTimestamp(a.issuedAt);
             });
 
             sortedTokens.forEach(data => {
                 try {
                     const isConsumed = data.status === 'CONSUMED' || data.status === 'REDEEMED' || data.mealRedeemed === true;
-                    const dateStr = data.issuedDate || data.date;
+                    const dateStr = data.issuedDate || data.date || "";
                     
                     // CRITICAL SPEED FIX: Ensure only current month data is processed in the UI charts
                     if (!dateStr || dateStr < currentMonthStr) return;
@@ -457,7 +476,7 @@
                                     timeStr = data.issuedAt.toDate().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
                                 } else if (data.issuedAt.seconds) {
                                     timeStr = new Date(data.issuedAt.seconds * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-                                } else if (typeof data.issuedAt === 'string') {
+                                } else if (typeof data.issuedAt === 'string' || typeof data.issuedAt === 'number') {
                                     timeStr = new Date(data.issuedAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
                                 }
                             }
@@ -582,7 +601,7 @@
             
             if (startDate >= currentMonthStart) {
                 return loadedTokens.filter(t => {
-                    const dateStr = t.issuedDate || t.date;
+                    const dateStr = t.issuedDate || t.date || "";
                     return dateStr >= startDate && dateStr <= endDate;
                 });
             }
@@ -591,7 +610,7 @@
             let results = [];
             snap.forEach(doc => {
                 const data = doc.data();
-                const dateStr = data.issuedDate || data.date;
+                const dateStr = data.issuedDate || data.date || "";
                 if (dateStr <= endDate) {
                     results.push(data);
                 }
@@ -635,13 +654,12 @@
                 let totalCost = 0;
 
                 targetTokens.sort((a, b) => {
-                    const tA = a.issuedAt?.seconds || a.issuedAt || 0;
-                    const tB = b.issuedAt?.seconds || b.issuedAt || 0;
-                    return tA - tB; 
+                    return getTimestamp(a.issuedAt) - getTimestamp(b.issuedAt);
                 });
 
                 targetTokens.forEach(log => {
                     const isConsumed = log.status === 'CONSUMED' || log.status === 'REDEEMED' || log.mealRedeemed === true;
+                    const dateStr = log.issuedDate || log.date || "";
                     
                     let cost = 0;
                     if (log.costs && typeof log.costs.total === 'number') {
@@ -649,10 +667,9 @@
                     } else if (log.costApplied) {
                         cost = log.costApplied;
                     } else {
-                        cost = parseFloat(dailyRates[getDayName(log.issuedDate || log.date)]) || 0;
+                        cost = parseFloat(dailyRates[getDayName(dateStr)]) || 0;
                     }
 
-                    const dateStr = log.issuedDate || log.date;
                     const dept = log.dept || log.department || '';
                     const acct = log.accountName || log.account || 'CTE';
                     const comp = log.companyName || log.company || '';
@@ -674,7 +691,7 @@
                     if (log.issuedAt) {
                         if (typeof log.issuedAt.toDate === 'function') timeStr = log.issuedAt.toDate().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
                         else if (log.issuedAt.seconds) timeStr = new Date(log.issuedAt.seconds * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-                        else if (typeof log.issuedAt === 'string') timeStr = new Date(log.issuedAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                        else if (typeof log.issuedAt === 'string' || typeof log.issuedAt === 'number') timeStr = new Date(log.issuedAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
                     }
 
                     const statusStr = isConsumed ? 'REDEEMED' : 'CLEARED';
@@ -781,13 +798,13 @@
                     if (filterType === 'COMP' && !log.companyName && !log.company) return;
                     if (filterType === 'SITE' && !log.site) return;
 
-                    const dateStr = log.issuedDate || log.date;
+                    const dateStr = log.issuedDate || log.date || "";
                     
                     let timeStr = '';
                     if (log.issuedAt) {
                         if (typeof log.issuedAt.toDate === 'function') timeStr = log.issuedAt.toDate().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
                         else if (log.issuedAt.seconds) timeStr = new Date(log.issuedAt.seconds * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-                        else if (typeof log.issuedAt === 'string') timeStr = new Date(log.issuedAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                        else if (typeof log.issuedAt === 'string' || typeof log.issuedAt === 'number') timeStr = new Date(log.issuedAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
                     }
 
                     const statusStr = isConsumed ? 'REDEEMED' : 'CLEARED';
